@@ -5,10 +5,11 @@ import ollama
 from rich.console import Console
 from rich.panel import Panel
 from rich.rule import Rule
+from rich.text import Text
 
 console = Console()
 
-MODEL = "qwen2.5:7b"
+DEFAULT_MODEL = "qwen2.5:7b"
 
 SYSTEM_PROMPT = (
     "You are a helpful assistant with access to tools. "
@@ -98,10 +99,67 @@ TOOL_HANDLERS = {
 }
 
 
-def run_agent_turn(history: list) -> list:
+def select_model() -> str:
+    try:
+        models = ollama.list().models
+    except Exception:
+        console.print(
+            "[bold red]Could not connect to Ollama. Is it running?[/bold red]"
+        )
+        raise SystemExit(1)
+
+    if not models:
+        console.print(
+            "[bold red]No local models found. Pull one with 'ollama pull <name>'.[/bold red]"
+        )
+        raise SystemExit(1)
+
+    names = [m.model for m in models]
+    default = DEFAULT_MODEL if DEFAULT_MODEL in names else None
+
+    console.print("[bold]Available models:[/bold]")
+    for i, name in enumerate(names, 1):
+        tag = " [dim](default)[/dim]" if name == default else ""
+        console.print(f"  [cyan]{i}.[/cyan] {name}{tag}", highlight=False)
+    console.print()
+
+    while True:
+        if default:
+            prompt = Text.assemble(
+                ("Select model", "bold cyan"),
+                (" (Enter for ", "dim"),
+                (default, "green"),
+                ("):", "dim"),
+                " ",
+            )
+        else:
+            prompt = Text.assemble(
+                ("Select model", "bold cyan"),
+                (f" (enter 1–{len(names)}):", "dim"),
+                " ",
+            )
+        raw = console.input(prompt).strip()
+
+        if not raw:
+            if default:
+                return default
+            console.print(
+                f"[yellow]No default available — pick a number between 1 and {len(names)}.[/yellow]"
+            )
+            continue
+
+        if raw.isdigit() and 1 <= int(raw) <= len(names):
+            return names[int(raw) - 1]
+
+        console.print(
+            f"[yellow]Invalid choice. Enter a number between 1 and {len(names)}.[/yellow]"
+        )
+
+
+def run_agent_turn(history: list, model: str) -> list:
     while True:
         with console.status("[bold green]Thinking...[/bold green]", spinner="dots"):
-            response = ollama.chat(model=MODEL, messages=history, tools=TOOLS)
+            response = ollama.chat(model=model, messages=history, tools=TOOLS)
 
         msg = response.message
         history.append(msg)
@@ -136,8 +194,13 @@ def main():
     console.print(
         Rule("[bold green]Jägerbot[/bold green] [dim]AI Agent[/dim]", style="green")
     )
+    console.print()
+
+    model = select_model()
+
     console.print(
-        f"[dim]  model: [/dim][green]{MODEL}[/green][dim]  •  type 'exit' or Ctrl+C to quit[/dim]\n"
+        f"\n[dim]  model: [/dim][green]{model}[/green][dim]  •  type 'exit' or Ctrl+C to quit[/dim]\n",
+        highlight=False,
     )
 
     history = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -157,7 +220,7 @@ def main():
 
         console.print()
         history.append({"role": "user", "content": user_input})
-        history = run_agent_turn(history)
+        history = run_agent_turn(history, model)
         console.print()
 
 
